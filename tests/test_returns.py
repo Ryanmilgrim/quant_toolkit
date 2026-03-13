@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from quant_toolkit.returns import to_log_returns
+from toolkit.returns import to_log_returns
 
 
 def test_simple_series():

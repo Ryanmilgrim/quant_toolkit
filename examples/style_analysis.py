@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from quant_toolkit.analysis import StyleAnalysis
+from toolkit.analysis import StyleAnalysis
 
 # Build a synthetic monthly universe with known weights
 rng = np.random.default_rng(0)

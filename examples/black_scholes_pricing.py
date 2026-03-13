@@ -1,6 +1,6 @@
 """Price European call and put options with Black-Scholes."""
 
-from quant_toolkit.analysis import black_scholes_price
+from toolkit.analysis import black_scholes_price
 
 params = dict(
     spot=100.0,

@@ -53,30 +53,30 @@ class StyleRun:
 
     def plot_growth(self, *, ax=None, **kwargs):
         """Plot cumulative indexed growth for portfolio vs benchmark."""
-        from quant_toolkit.charts import plot_growth
+        from toolkit.charts import plot_growth
         return plot_growth(self.portfolio_return, self.benchmark_return, ax=ax, **kwargs)
 
     def plot_tracking_error(self, *, ax=None, **kwargs):
         """Plot residual return with control limits."""
-        from quant_toolkit.charts import plot_tracking_error
+        from toolkit.charts import plot_tracking_error
         return plot_tracking_error(self.tracking_error, ax=ax, **kwargs)
 
     def plot_weights(self, *, ax=None, **kwargs):
         """Stacked area chart of rolling style weights."""
-        from quant_toolkit.charts import plot_weights_history
+        from toolkit.charts import plot_weights_history
         return plot_weights_history(self.weights, ax=ax, **kwargs)
 
     def plot_weights_snapshot(self, *, ax=None, **kwargs):
         """Bar chart of the latest weight allocation."""
-        from quant_toolkit.charts import plot_weights_snapshot
+        from toolkit.charts import plot_weights_snapshot
         if self.weights.empty:
-            from quant_toolkit.charts import _get_ax
+            from toolkit.charts import _get_ax
             return _get_ax(ax)
         return plot_weights_snapshot(self.weights.iloc[-1], ax=ax, **kwargs)
 
     def performance(self, *, steps_per_year: Optional[int] = None) -> dict:
         """Compute performance metrics for portfolio, benchmark, and active return."""
-        from quant_toolkit.charts import STEPS_PER_YEAR, performance_summary
+        from toolkit.charts import STEPS_PER_YEAR, performance_summary
         if steps_per_year is None:
             freq = str(self.params.get("window_frequency") or "daily")
             steps_per_year = STEPS_PER_YEAR.get(freq, 252)
@@ -127,7 +127,7 @@ class StyleAnalysis:
 
     Data
     ----
-    Expects `uni` from quant_dashboard.lib.universe.get_universe_returns(...),
+    Expects `uni` from toolkit.universe.get_universe_returns(...),
     with MultiIndex columns:
       - uni["assets"]       : asset returns (X)
       - uni["benchmarks"]   : includes benchmark series (y)

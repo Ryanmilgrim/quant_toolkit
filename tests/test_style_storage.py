@@ -4,7 +4,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from quant_toolkit.analysis import (
+from toolkit.analysis import (
     StyleAnalysis,
     StyleAnalysisSnapshot,
     list_style_snapshots,

@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from quant_toolkit.charts import (
+from toolkit.charts import (
     plot_growth,
     plot_tracking_error,
     plot_weights_history,

@@ -1,6 +1,8 @@
 """Quantitative finance toolkit — pure Python, no web framework dependencies."""
 
 from toolkit.analysis import (
+    FactorModel,
+    FactorRun,
     METHOD_PROJECTION,
     METHOD_QP,
     StyleAnalysis,
@@ -25,6 +27,8 @@ from toolkit.returns import to_log_returns
 from toolkit.universe import get_universe_returns, get_universe_start_date
 
 __all__ = [
+    "FactorModel",
+    "FactorRun",
     "METHOD_PROJECTION",
     "METHOD_QP",
     "StyleAnalysis",

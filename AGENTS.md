@@ -13,11 +13,13 @@ separate repo: [quant_website](https://github.com/Ryanmilgrim/quant_website).
 ```
 toolkit/
   __init__.py            # Top-level public API
-  charts.py              # Matplotlib chart functions (plot_growth, plot_tracking_error, etc.)
+  charts.py              # Matplotlib chart functions (style analysis)
+  factor_charts.py       # Matplotlib chart functions (factor analysis)
   plotly_payload.py      # Plotly.js JSON payload builders (bridge for web apps)
   returns.py             # Return transforms (simple <-> log)
   analysis/              # Analytical models
     benchmark_style.py   # StyleAnalysis, StyleRun (with plot methods)
+    factor_analysis.py   # FactorModel, FactorRun (PCA + GARCH risk model)
     black_scholes.py     # European option pricing
     style_storage.py     # Save/load analysis snapshots (pickle)
   data/                  # Market data adapters
@@ -57,6 +59,7 @@ pytest
 - Small, well-named functions/classes with type hints.
 - Chart functions follow the matplotlib `ax` pattern (`ax=None` creates a new figure).
 - `StyleRun` has convenience plot methods that delegate to `charts.py`.
+- `FactorRun` has convenience plot methods that delegate to `factor_charts.py`.
 
 ### Numerics & correctness
 - Validate inputs explicitly (non-negative vol, positive time to expiry).
@@ -64,7 +67,7 @@ pytest
 - Tests must be deterministic and run without network access.
 
 ## Dependencies
-- Runtime: pandas, numpy, requests, matplotlib
+- Runtime: pandas, numpy, requests, matplotlib, scikit-learn, statsmodels, arch, tqdm
 - Dev: pytest
 - No Flask, no yfinance
 

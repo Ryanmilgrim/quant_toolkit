@@ -2,8 +2,8 @@
 
 from datetime import date
 
-from quant_toolkit.data import fetch_ff_industry_daily, fetch_ff_factors_daily
-from quant_toolkit.universe import get_universe_returns
+from toolkit.data import fetch_ff_industry_daily, fetch_ff_factors_daily
+from toolkit.universe import get_universe_returns
 
 # Fetch 10-industry daily returns (value-weighted, log returns)
 industries = fetch_ff_industry_daily(10, weighting="value", start_date=date(2020, 1, 1))

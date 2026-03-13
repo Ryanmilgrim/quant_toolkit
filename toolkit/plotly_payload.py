@@ -2,7 +2,7 @@
 
 These functions convert pandas DataFrames into JSON-serialisable dicts
 suitable for rendering with Plotly.js on the client side.  They are a
-bridge between :mod:`quant_toolkit` analytics and a web presentation layer.
+bridge between :mod:`toolkit` analytics and a web presentation layer.
 """
 
 from __future__ import annotations
@@ -12,7 +12,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from quant_toolkit.charts import STEPS_PER_YEAR, _top_weights, performance_summary
+from toolkit.charts import STEPS_PER_YEAR, _top_weights, performance_summary
 
 
 def line_chart_payload(

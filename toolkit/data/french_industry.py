@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from quant_toolkit.returns import to_log_returns
+from toolkit.returns import to_log_returns
 
 Weighting = Literal["value", "equal"]
 JoinHow = Literal["inner", "outer"]

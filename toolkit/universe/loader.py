@@ -5,14 +5,14 @@ from typing import Optional
 
 import pandas as pd
 
-from quant_toolkit.data.french_industry import (
+from toolkit.data.french_industry import (
     FactorSet,
     ReturnForm,
     Weighting,
     fetch_ff_factors_daily,
     fetch_ff_industry_daily,
 )
-from quant_toolkit.returns import to_log_returns
+from toolkit.returns import to_log_returns
 
 
 def get_universe_returns(

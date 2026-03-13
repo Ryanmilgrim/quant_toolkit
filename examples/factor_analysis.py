@@ -7,6 +7,10 @@ Run with::
 
 from __future__ import annotations
 
+import matplotlib
+matplotlib.use("Agg")
+
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
@@ -66,18 +70,17 @@ def main() -> None:
     for k, v in ev.get("summary", {}).items():
         print(f"  {k}: {v}")
 
-    # --- Show plots ---
-    run.plot_beta_heatmap()
-    run.plot_factor_risk_heatmap(metric="correlation")
-
+    # --- Generate chart panel ---
     asset0 = str(run.beta_loadings.index[0])
-    run.plot_asset_residuals_and_vol(asset=asset0)
-    run.plot_returns_with_confidence_bands(asset=asset0)
 
-    run.plot_volatility_backtest(asset=asset0)
-    run.plot_aggregate_volatility_backtest()
-    run.plot_volatility_regression_scatter()
-    run.plot_agg_correlation_backtest(asset=asset0)
+    fig, axes = plt.subplots(2, 2, figsize=(16, 10))
+    run.plot_beta_heatmap(ax=axes[0, 0])
+    run.plot_factor_risk_heatmap(metric="correlation", ax=axes[0, 1])
+    run.plot_volatility_backtest(asset=asset0, ax=axes[1, 0])
+    run.plot_returns_with_confidence_bands(asset=asset0, ax=axes[1, 1])
+    fig.tight_layout()
+    fig.savefig("factor_analysis_charts.png", dpi=150)
+    print("\nSaved factor_analysis_charts.png")
 
 
 if __name__ == "__main__":

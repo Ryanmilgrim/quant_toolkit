@@ -1,12 +1,12 @@
 import numpy as np
 import pandas as pd
 
-from quant_toolkit.plotly_payload import (
+from toolkit.plotly_payload import (
     line_chart_payload,
     summarize_style_run,
     weights_history_payload,
 )
-from quant_toolkit.analysis import StyleAnalysis
+from toolkit.analysis import StyleAnalysis
 
 
 def test_line_chart_payload_basic():

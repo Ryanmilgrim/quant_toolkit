@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 import requests
 
-from quant_dashboard.lib.returns import to_log_returns
+from toolkit.returns import to_log_returns
 
 Weighting = Literal["value", "equal"]
 JoinHow = Literal["inner", "outer"]
@@ -53,7 +53,7 @@ class FrenchDownloadConfig:
     cache_dir: Path = Path.home() / ".cache" / "ken_french"
     timeout_s: float = 30.0
     max_retries: int = 4
-    user_agent: str = "Mozilla/5.0 (compatible; quant_dashboard/1.0)"
+    user_agent: str = "Mozilla/5.0 (compatible; quant_toolkit/1.0)"
 
 
 def _download_with_cache(url: str, dest: Path, cfg: FrenchDownloadConfig, refresh: bool) -> Path:

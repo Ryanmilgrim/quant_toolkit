@@ -6,7 +6,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from quant_toolkit.charts import (
+from toolkit.charts import (
     performance_summary,
     plot_growth,
     plot_tracking_error,

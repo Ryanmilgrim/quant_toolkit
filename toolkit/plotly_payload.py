@@ -12,7 +12,7 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 
-from quant_toolkit.charts import STEPS_PER_YEAR, _top_weights, performance_summary
+from toolkit.charts import STEPS_PER_YEAR, _top_weights, performance_summary
 
 
 def line_chart_payload(

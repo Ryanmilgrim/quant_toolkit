@@ -11,7 +11,7 @@ separate repo: [quant_website](https://github.com/Ryanmilgrim/quant_website).
 ### Package layout
 
 ```
-quant_toolkit/
+toolkit/
   __init__.py            # Top-level public API
   charts.py              # Matplotlib chart functions (plot_growth, plot_tracking_error, etc.)
   plotly_payload.py      # Plotly.js JSON payload builders (bridge for web apps)
@@ -30,7 +30,7 @@ pyproject.toml           # Package metadata and dependencies
 ```
 
 ### Hard rules
-- `quant_toolkit/**` **must not import Flask** or any web framework.
+- `toolkit/**` **must not import Flask** or any web framework.
 - All IO (network, file) is isolated in `data/` adapters and `analysis/style_storage.py`.
 - Pricing/risk/math functions must be deterministic and side-effect free.
 
@@ -43,7 +43,7 @@ pip install -e ".[dev]"
 
 ### After any code change (required)
 ```bash
-python -m compileall quant_toolkit/
+python -m compileall toolkit/
 pytest
 ```
 

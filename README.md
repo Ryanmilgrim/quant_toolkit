@@ -15,7 +15,7 @@ pip install -e ".[dev]"
 ### Black-Scholes option pricing
 
 ```python
-from quant_toolkit import black_scholes_price
+from toolkit import black_scholes_price
 
 call = black_scholes_price(
     spot=100, strike=105, time_to_expiry=0.5,
@@ -28,7 +28,7 @@ print(f"Call price: ${call:.2f}")
 
 ```python
 from datetime import date
-from quant_toolkit import fetch_ff_industry_daily, fetch_ff_factors_daily
+from toolkit import fetch_ff_industry_daily, fetch_ff_factors_daily
 
 # 10-industry daily returns (log, value-weighted)
 industries = fetch_ff_industry_daily(10, start_date=date(2020, 1, 1))
@@ -40,7 +40,7 @@ factors = fetch_ff_factors_daily(factor_set="ff3", start_date=date(2020, 1, 1))
 ### Benchmark style analysis with charts
 
 ```python
-from quant_toolkit import get_universe_returns, StyleAnalysis
+from toolkit import get_universe_returns, StyleAnalysis
 import matplotlib.pyplot as plt
 
 uni = get_universe_returns(10, start_date=date(2000, 1, 1))
@@ -68,7 +68,7 @@ print(perf["active"])      # includes info_ratio
 ### Plotly.js payloads (for web apps)
 
 ```python
-from quant_toolkit.plotly_payload import summarize_style_run
+from toolkit.plotly_payload import summarize_style_run
 
 # Returns JSON-serialisable dicts for Plotly.js rendering
 summary = summarize_style_run(run)
@@ -78,7 +78,7 @@ chart_data = summary["chart_growth"]   # {series: [{name, x, y}], y_axis_title}
 ## Project structure
 
 ```
-quant_toolkit/
+toolkit/
   __init__.py            # Top-level public API
   charts.py              # Matplotlib chart functions
   plotly_payload.py      # Plotly.js payload builders (web bridge)

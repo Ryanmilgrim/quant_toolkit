@@ -2,7 +2,7 @@ import math
 
 import pytest
 
-from quant_toolkit.analysis import black_scholes_price
+from toolkit.analysis import black_scholes_price
 
 
 def test_call_price_basic():

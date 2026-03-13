@@ -1,0 +1,21 @@
+[build-system]
+requires = ["setuptools>=68.0"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "quant_toolkit"
+version = "0.1.0"
+description = "Pure-Python quantitative finance toolkit: Fama-French data, benchmark style analysis, Black-Scholes pricing, and charts."
+requires-python = ">=3.10"
+dependencies = [
+    "pandas>=2.0",
+    "numpy>=1.24",
+    "requests>=2.28",
+    "matplotlib>=3.7",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["quant_toolkit*"]

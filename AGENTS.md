@@ -1,98 +1,73 @@
-# quant_dashboard — Agent Instructions (AGENTS.md)
+# quant_toolkit — Agent Instructions (AGENTS.md)
 
 ## What this repo is
-This repo should become:
-1) a reusable **quant library** (pure Python, importable elsewhere), and
-2) a **Flask demo app** that uses the library to showcase analyses, visualizations, and examples.
+A reusable **pure-Python quantitative finance toolkit** (no web framework dependencies).
 
-The demo app is important, but the quant logic must remain library-first.
+This is a library-only package. The companion Flask web dashboard lives in a
+separate repo: [quant_website](https://github.com/Ryanmilgrim/quant_website).
 
-## Architecture goals (most important)
-### Separation of concerns
-- **Library code**: pure Python modules with no Flask imports and no template/render logic.
-- **Web/demo code**: Flask blueprints/routes/templates that call into the library.
+## Architecture
 
-Hard rule:
-- `quant_dashboard/lib/**` (or equivalent) **must not import Flask** (no `flask`, no request context).
+### Package layout
 
-### Intended target layout (preferred)
-If/when you refactor structure, aim for:
+```
+quant_toolkit/
+  __init__.py            # Top-level public API
+  charts.py              # Matplotlib chart functions (plot_growth, plot_tracking_error, etc.)
+  plotly_payload.py      # Plotly.js JSON payload builders (bridge for web apps)
+  returns.py             # Return transforms (simple <-> log)
+  analysis/              # Analytical models
+    benchmark_style.py   # StyleAnalysis, StyleRun (with plot methods)
+    black_scholes.py     # European option pricing
+    style_storage.py     # Save/load analysis snapshots (pickle)
+  data/                  # Market data adapters
+    french_industry.py   # Fama-French Data Library fetcher
+  universe/              # Universe construction
+    loader.py            # get_universe_returns(), get_universe_start_date()
+tests/                   # Unit tests
+examples/                # Runnable example scripts
+pyproject.toml           # Package metadata and dependencies
+```
 
-quant_dashboard/
-  __init__.py
-  lib/                 # reusable quant library (pure)
-    pricing/
-    data/
-    risk/
-    timeseries/
-  web/                 # Flask demo/presentation layer
-    __init__.py        # create_app() lives here
-    blueprints/
-    templates/
-wsgi.py                # repo-root Flask entrypoint
+### Hard rules
+- `quant_toolkit/**` **must not import Flask** or any web framework.
+- All IO (network, file) is isolated in `data/` adapters and `analysis/style_storage.py`.
+- Pricing/risk/math functions must be deterministic and side-effect free.
 
-Canonical dev run command after refactor:
-- `flask --app wsgi run --debug`
+## Development workflow
 
-Note: the repo currently has `app.py` + `app/`. When touching those areas, prefer incremental steps that move toward the target layout while keeping behavior stable.
+### Setup
+```bash
+pip install -e ".[dev]"
+```
 
-## Development workflow expectations
-### Before you start
-- Read the README and repo tree.
-- Identify where the change belongs (library vs web).
-
-### After any code change (required best effort)
-Run:
-- `python -m compileall .`
-
-If tests exist:
-- `pytest`
-
-If the web app is affected:
-- Ensure the app still boots with the canonical run command for the current layout.
+### After any code change (required)
+```bash
+python -m compileall quant_toolkit/
+pytest
+```
 
 ### Keep diffs small and reviewable
-- Prefer small, cohesive commits/patches.
-- Avoid drive-by reformatting unless necessary.
+- Prefer small, cohesive commits.
+- Avoid drive-by reformatting.
 
-## Quant library design standards
+## Design standards
+
 ### API & stability
-- Prefer small, well-named functions/classes with docstrings.
-- Add type hints for public functions where reasonable.
-- Keep IO isolated:
-  - Network/data fetching belongs in `lib/data/*` adapters.
-  - Pricing/risk/math functions should be deterministic and side-effect free.
+- Small, well-named functions/classes with type hints.
+- Chart functions follow the matplotlib `ax` pattern (`ax=None` creates a new figure).
+- `StyleRun` has convenience plot methods that delegate to `charts.py`.
 
 ### Numerics & correctness
-- Validate inputs explicitly (e.g., non-negative vol, positive time to expiry).
-- Handle edge cases intentionally (t=0, vol=0, missing data, empty frames).
-- Prefer implementations that are testable without network access.
-
-## Testing guidance
-- Add unit tests for library code first (deterministic, no network).
-- If demonstrating an analysis in the web app, keep it thin:
-  - blueprint parses inputs → calls library → renders result
+- Validate inputs explicitly (non-negative vol, positive time to expiry).
+- Handle edge cases (empty DataFrames, NaN weights, zero vol).
+- Tests must be deterministic and run without network access.
 
 ## Dependencies
-- Avoid adding new dependencies unless clearly justified.
-- If dependencies change, keep `requirements.txt` clean (no merge conflict markers).
-- If adding dev/test tooling, prefer `requirements-dev.txt` (or clearly documented approach).
+- Runtime: pandas, numpy, requests, matplotlib
+- Dev: pytest
+- No Flask, no yfinance
 
 ## Documentation
-- Update README when run commands / layout change.
-- If you add a new quant capability, add:
-  - a short library docstring/reference
-  - a small demo route/page (optional but nice)
-
-## Web UI style guide (demo app)
-- Maintain the report-style theme in `quant_dashboard/web/static/styles.css` (navy/teal/gray palette, Oswald headings, Source Sans 3 body, Merriweather callouts).
-- Use the section header pattern with `.section-header`, `.section-number`, `.section-title`, and `.section-rule`.
-- Keep layouts on the 12-column grid (`.report-grid`, `.span-*`) and use existing card patterns (`.card`, `.report-card`, `.panel-navy`, `.bubble-callout`).
-- For charts, keep restrained styling (thin gridlines, minimal clutter); benchmark line in teal (`#2c9bac`), industries in navy (`#001f38`), no x-axis title.
-- For charts, use two-digit year tick labels on the x-axis (e.g., `'95`, `'26`). For return charts, label the y-axis as "Daily return" and show percent ticks with one decimal place. Avoid downsampling by default; if performance demands it, cap at ~5040 points.
-- Preserve the persistent disclaimer text in both banner and footer, and do not reference BNY anywhere:
-  - "This personal site was created by Ryan Milgrim, CFA for recreation and is not intended as client advice. For educational/demo purposes only."
-
-## Non-goals / disclaimers
-- Do not present outputs as financial advice.
-- Prefer educational framing and reproducible calculations.
+- Update README when capabilities change.
+- Add example scripts for new features in `examples/`.

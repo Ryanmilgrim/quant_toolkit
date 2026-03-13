@@ -1,7 +1,7 @@
 import numpy as np
 import pandas as pd
 
-from quant_dashboard.lib.analysis import StyleAnalysis
+from quant_toolkit.analysis import StyleAnalysis
 
 
 def _synthetic_monthly_universe(

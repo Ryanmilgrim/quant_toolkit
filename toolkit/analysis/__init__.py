@@ -3,6 +3,13 @@
 from .benchmark_style import METHOD_PROJECTION, METHOD_QP, StyleAnalysis, StyleRun
 from .black_scholes import _norm_cdf, black_scholes_price
 from .factor_analysis import FactorModel, FactorRun
+from .factor_storage import (
+    FactorAnalysisSnapshot,
+    FactorSnapshotInfo,
+    list_factor_snapshots,
+    load_factor_snapshot,
+    save_factor_snapshot,
+)
 from .style_storage import (
     StyleAnalysisSnapshot,
     StyleSnapshotInfo,
@@ -14,8 +21,10 @@ from .style_storage import (
 )
 
 __all__ = [
+    "FactorAnalysisSnapshot",
     "FactorModel",
     "FactorRun",
+    "FactorSnapshotInfo",
     "METHOD_PROJECTION",
     "METHOD_QP",
     "StyleAnalysis",
@@ -23,10 +32,13 @@ __all__ = [
     "StyleRun",
     "StyleSnapshotInfo",
     "black_scholes_price",
+    "list_factor_snapshots",
     "list_style_snapshots",
+    "load_factor_snapshot",
     "load_style_snapshot",
     "_norm_cdf",
     "normalize_snapshot_name",
+    "save_factor_snapshot",
     "save_style_snapshot",
     "snapshot_path",
 ]

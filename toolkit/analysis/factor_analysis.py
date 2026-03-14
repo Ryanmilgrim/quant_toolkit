@@ -1223,6 +1223,7 @@ class FactorModel:
             "selected_factors": selected_factors,
             "betas_ordered": betas_ordered,
             "by_asset_model": by_asset_model,
+            "assets_excess": assets_excess,
             # Step 2
             "resid": resid,
             "resid_cond_var": resid_cond_var,
@@ -1303,6 +1304,19 @@ class FactorModel:
         pred_corr_to_agg = pd.DataFrame(index=eval_dates, columns=asset_names, dtype=float)
         real_corr_to_agg = pd.DataFrame(index=eval_dates, columns=asset_names, dtype=float)
 
+        # Pairwise correlation storage (upper triangle only)
+        pair_keys: List[str] = []
+        for i in range(len(asset_names)):
+            for j in range(i + 1, len(asset_names)):
+                a, b = sorted([asset_names[i], asset_names[j]])
+                pair_keys.append(f"{a}|{b}")
+        pred_corr_pairwise: dict[str, pd.Series] = {
+            k: pd.Series(np.nan, index=eval_dates, dtype=float) for k in pair_keys
+        }
+        real_corr_pairwise: dict[str, pd.Series] = {
+            k: pd.Series(np.nan, index=eval_dates, dtype=float) for k in pair_keys
+        }
+
         X = assets_excess.to_numpy(dtype=float)
         n_assets = X.shape[1]
         w_agg = np.full(n_assets, 1.0 / float(n_assets), dtype=float)
@@ -1377,6 +1391,14 @@ class FactorModel:
             corr_frob_err.loc[dt] = float(
                 np.linalg.norm(pred_corr - real_corr, ord="fro"))
 
+            # Store pairwise correlations (upper triangle)
+            for i in range(n_assets):
+                for j in range(i + 1, n_assets):
+                    a, b = sorted([asset_names[i], asset_names[j]])
+                    key = f"{a}|{b}"
+                    pred_corr_pairwise[key].loc[dt] = float(pred_corr[i, j])
+                    real_corr_pairwise[key].loc[dt] = float(real_corr[i, j])
+
         ins = vol_mse.index[vol_mse.index < train_end]
         oos = vol_mse.index[vol_mse.index >= train_end]
 
@@ -1424,6 +1446,8 @@ class FactorModel:
                 "real_avg_vol_ann": real_avg_vol_ann,
                 "pred_corr_to_agg": pred_corr_to_agg,
                 "real_corr_to_agg": real_corr_to_agg,
+                "pred_corr_pairwise": pred_corr_pairwise,
+                "real_corr_pairwise": real_corr_pairwise,
             },
         }
 

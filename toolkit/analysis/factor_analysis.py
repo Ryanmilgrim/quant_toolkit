@@ -453,30 +453,24 @@ def _filter_garch(
         var0 = float(max(var0, omega / max(1e-12, (1.0 - ab))))
 
     T = len(full_index)
-    h = np.full(T, np.nan, dtype=float)
-    fwd = np.full(T, np.nan, dtype=float)
+    h = np.empty(T, dtype=float)
+    fwd = np.empty(T, dtype=float)
 
-    for t in range(T):
-        if t == 0:
-            h[t] = max(var0, 0.0)
-            if np.isfinite(e[0]):
-                fwd[t] = max(omega + alpha * (e[0] ** 2) + beta * h[t], 0.0)
-            else:
-                fwd[t] = max(h[t], 0.0)
-            continue
+    e_valid = np.isfinite(e)
+    e2 = np.where(e_valid, e * e, 0.0)
 
-        if not np.isfinite(h[t - 1]):
-            h[t - 1] = max(var0, 0.0)
-
-        if np.isfinite(e[t - 1]):
-            h[t] = max(omega + alpha * (e[t - 1] ** 2) + beta * h[t - 1], 0.0)
+    h[0] = max(var0, 0.0)
+    for t in range(1, T):
+        if e_valid[t - 1]:
+            h[t] = omega + alpha * e2[t - 1] + beta * h[t - 1]
         else:
-            h[t] = max(h[t - 1], 0.0)
+            h[t] = h[t - 1]
+        if h[t] < 0.0:
+            h[t] = 0.0
 
-        if np.isfinite(e[t]):
-            fwd[t] = max(omega + alpha * (e[t] ** 2) + beta * h[t], 0.0)
-        else:
-            fwd[t] = max(h[t], 0.0)
+    # Forward variance — fully vectorized
+    fwd = np.where(e_valid, omega + alpha * e2 + beta * h, h)
+    np.maximum(fwd, 0.0, out=fwd)
 
     cond_vol = np.sqrt(np.clip(h, 0.0, None))
     std_resid = np.full(T, np.nan, dtype=float)
@@ -505,24 +499,24 @@ def _filter_ewma(
     e = yv - mu
 
     T = len(full_index)
-    h = np.full(T, np.nan, dtype=float)
-    fwd = np.full(T, np.nan, dtype=float)
+    h = np.empty(T, dtype=float)
 
     y_nonan = y.dropna()
     h0 = max(float(y_nonan.var(ddof=1)) if len(y_nonan) > 1 else 0.0, 0.0)
+    one_minus_lam = 1.0 - lam
 
-    for t in range(T):
-        if t == 0:
-            h[t] = h0
+    e_valid = np.isfinite(e)
+    e2 = np.where(e_valid, e * e, 0.0)
+
+    h[0] = h0
+    for t in range(1, T):
+        if e_valid[t - 1]:
+            h[t] = lam * h[t - 1] + one_minus_lam * e2[t - 1]
         else:
-            if np.isfinite(e[t - 1]):
-                h[t] = lam * h[t - 1] + (1.0 - lam) * (e[t - 1] ** 2)
-            else:
-                h[t] = h[t - 1]
-        if np.isfinite(e[t]):
-            fwd[t] = lam * h[t] + (1.0 - lam) * (e[t] ** 2)
-        else:
-            fwd[t] = h[t]
+            h[t] = h[t - 1]
+
+    # Forward variance — fully vectorized
+    fwd = np.where(e_valid, lam * h + one_minus_lam * e2, h)
 
     cond_vol = np.sqrt(np.clip(h, 0.0, None))
     std = np.full(T, np.nan, dtype=float)
@@ -829,6 +823,63 @@ class FactorRun:
 
 
 # ---------------------------------------------------------------------------
+# Parallel execution helpers
+# ---------------------------------------------------------------------------
+
+def _fit_and_filter_garch_one(
+    name: str,
+    y_train: pd.Series,
+    y_full: pd.Series,
+    full_index: pd.Index,
+    garch_kwargs: Dict[str, Any],
+) -> Tuple[str, Dict[str, Any]]:
+    """Fit + filter GARCH for a single series. Suitable for parallel dispatch."""
+    gp = _fit_garch(y_train, **garch_kwargs)
+    out = _filter_garch(y_full, gp, full_index=full_index)
+    return name, out
+
+
+def _estimate_betas_one(
+    asset_name: str,
+    y: pd.Series,
+    X: pd.DataFrame,
+    beta_kwargs: Dict[str, Any],
+) -> Tuple[str, Any, List[str], Dict[str, Any]]:
+    """Run a single asset beta regression. Suitable for parallel dispatch."""
+    res, sel, meta = _estimate_asset_betas(y=y, X=X, **beta_kwargs)
+    return asset_name, res, sel, meta
+
+
+def _parallel_map(fn, args_list: list, max_workers: Optional[int] = None):
+    """Run *fn(*args)* for each args tuple in *args_list* using ThreadPoolExecutor.
+
+    Uses threads (not processes) to avoid the heavy process-spawn overhead on
+    Windows.  The numerical libraries (arch, scipy, sklearn, numpy) release the
+    GIL during their C-level computation, so threads still achieve meaningful
+    parallelism here.
+
+    Falls back to sequential execution if there is only one item.
+    """
+    import os
+    if max_workers is None:
+        max_workers = min(len(args_list), os.cpu_count() or 4)
+    if max_workers <= 1 or len(args_list) <= 1:
+        return [fn(*a) for a in args_list]
+    try:
+        from concurrent.futures import ThreadPoolExecutor, as_completed
+        results: list = [None] * len(args_list)
+        with ThreadPoolExecutor(max_workers=max_workers) as pool:
+            future_to_idx = {
+                pool.submit(fn, *a): i for i, a in enumerate(args_list)
+            }
+            for fut in as_completed(future_to_idx):
+                results[future_to_idx[fut]] = fut.result()
+        return results
+    except Exception:
+        return [fn(*a) for a in args_list]
+
+
+# ---------------------------------------------------------------------------
 # FactorModel
 # ---------------------------------------------------------------------------
 
@@ -1054,7 +1105,7 @@ class FactorModel:
         asset_names = list(assets.columns)
         factor_names = list(factors.columns)
 
-        # --- Step 1: betas ---
+        # --- Step 1: betas (parallel) ---
         beta_loadings = pd.DataFrame(0.0, index=asset_names, columns=factor_names)
         alpha_intercept = pd.Series(np.nan, index=asset_names, name="alpha_intercept")
         r2 = pd.Series(np.nan, index=asset_names, name="r2")
@@ -1062,22 +1113,21 @@ class FactorModel:
         selected_factors: dict[str, List[str]] = {}
         by_asset_model: dict[str, Any] = {}
 
-        for a in _iter_with_progress(asset_names,
-                                     desc="Step 1/3: Factor regressions",
-                                     unit="asset", disable=not progress):
-            y = assets_excess_train[a].rename(a)
-            X = factors_train
-
-            res, sel, meta = _estimate_asset_betas(
-                y=y, X=X,
-                max_exhaustive_factors=self.max_exhaustive_factors,
-                lasso_cv_splits=self.lasso_cv_splits,
-                lasso_alphas=self.lasso_alphas,
-                lasso_max_iter=self.lasso_max_iter,
-                lasso_coef_tol=self.lasso_coef_tol,
-                tstat_cutoff=self.tstat_cutoff,
-                min_factors=self.min_factors,
-            )
+        beta_kwargs: Dict[str, Any] = dict(
+            max_exhaustive_factors=self.max_exhaustive_factors,
+            lasso_cv_splits=self.lasso_cv_splits,
+            lasso_alphas=self.lasso_alphas,
+            lasso_max_iter=self.lasso_max_iter,
+            lasso_coef_tol=self.lasso_coef_tol,
+            tstat_cutoff=self.tstat_cutoff,
+            min_factors=self.min_factors,
+        )
+        beta_args = [
+            (a, assets_excess_train[a].rename(a), factors_train, beta_kwargs)
+            for a in asset_names
+        ]
+        beta_results = _parallel_map(_estimate_betas_one, beta_args)
+        for a, res, sel, meta in beta_results:
             selected_factors[a] = list(sel)
             lasso_alpha.loc[a] = float(meta.get("lasso_alpha", np.nan))
             alpha_intercept.loc[a] = float(res.params.get("alpha", np.nan))
@@ -1111,26 +1161,28 @@ class FactorModel:
         )
         resid = (assets_excess - pred_excess).astype(float)
 
-        # --- Step 2: residual GARCH ---
+        # --- Step 2: residual GARCH (parallel) ---
         resid_cond_var = pd.DataFrame(index=idx, columns=asset_names, dtype=float)
         resid_forecast_var = pd.DataFrame(index=idx, columns=asset_names, dtype=float)
         resid_std = pd.DataFrame(index=idx, columns=asset_names, dtype=float)
         resid_garch_meta: dict[str, Any] = {}
 
-        for a in _iter_with_progress(asset_names,
-                                     desc="Step 2/3: GARCH residuals",
-                                     unit="asset", disable=not progress):
-            gp = _fit_garch(resid.loc[idx_train, a], mean="Zero",
-                            dist=self.garch_dist, scale=self.garch_scale,
-                            min_obs=self.garch_min_obs,
-                            ewma_lambda=self.ewma_lambda)
-            out = _filter_garch(resid[a], gp, full_index=idx)
+        resid_garch_kwargs: Dict[str, Any] = dict(
+            mean="Zero", dist=self.garch_dist, scale=self.garch_scale,
+            min_obs=self.garch_min_obs, ewma_lambda=self.ewma_lambda,
+        )
+        resid_args = [
+            (a, resid.loc[idx_train, a], resid[a], idx, resid_garch_kwargs)
+            for a in asset_names
+        ]
+        resid_results = _parallel_map(_fit_and_filter_garch_one, resid_args)
+        for a, out in resid_results:
             resid_cond_var[a] = out["cond_var"]
             resid_forecast_var[a] = out["forecast_var"]
             resid_std[a] = out["std_resid"]
             resid_garch_meta[a] = out["meta"]
 
-        # --- Step 3: PCA + PC GARCH ---
+        # --- Step 3: PCA + PC GARCH (parallel) ---
         eigen_vectors, singular_values = _fit_pca_svd(
             factors_train, demean=self.pca_demean,
             n_components=self.pca_n_components,
@@ -1144,14 +1196,16 @@ class FactorModel:
         pc_std = pd.DataFrame(index=idx, columns=pc_names, dtype=float)
         pc_garch_meta: dict[str, Any] = {}
 
-        for pc in _iter_with_progress(pc_names,
-                                      desc="Step 3/3: GARCH PCs",
-                                      unit="pc", disable=not progress):
-            gp = _fit_garch(pc_returns.loc[idx_train, pc], mean="Constant",
-                            dist=self.garch_dist, scale=self.garch_scale,
-                            min_obs=self.garch_min_obs,
-                            ewma_lambda=self.ewma_lambda)
-            out = _filter_garch(pc_returns[pc], gp, full_index=idx)
+        pc_garch_kwargs: Dict[str, Any] = dict(
+            mean="Constant", dist=self.garch_dist, scale=self.garch_scale,
+            min_obs=self.garch_min_obs, ewma_lambda=self.ewma_lambda,
+        )
+        pc_args = [
+            (pc, pc_returns.loc[idx_train, pc], pc_returns[pc], idx, pc_garch_kwargs)
+            for pc in pc_names
+        ]
+        pc_results = _parallel_map(_fit_and_filter_garch_one, pc_args)
+        for pc, out in pc_results:
             pc_cond_var[pc] = out["cond_var"]
             pc_forecast_var[pc] = out["forecast_var"]
             pc_std[pc] = out["std_resid"]
@@ -1297,55 +1351,62 @@ class FactorModel:
         asset_names = list(run["beta_loadings"].index)
         assets_excess = assets_excess.reindex(columns=asset_names)
 
-        vol_mse = pd.Series(np.nan, index=eval_dates, name="vol_mse")
-        corr_frob_err = pd.Series(np.nan, index=eval_dates, name="corr_frob_err")
-        pred_vol = pd.DataFrame(index=eval_dates, columns=asset_names, dtype=float)
-        real_vol = pd.DataFrame(index=eval_dates, columns=asset_names, dtype=float)
-        pred_corr_to_agg = pd.DataFrame(index=eval_dates, columns=asset_names, dtype=float)
-        real_corr_to_agg = pd.DataFrame(index=eval_dates, columns=asset_names, dtype=float)
-
-        # Pairwise correlation storage (upper triangle only)
-        pair_keys: List[str] = []
-        for i in range(len(asset_names)):
-            for j in range(i + 1, len(asset_names)):
-                a, b = sorted([asset_names[i], asset_names[j]])
-                pair_keys.append(f"{a}|{b}")
-        pred_corr_pairwise: dict[str, pd.Series] = {
-            k: pd.Series(np.nan, index=eval_dates, dtype=float) for k in pair_keys
-        }
-        real_corr_pairwise: dict[str, pd.Series] = {
-            k: pd.Series(np.nan, index=eval_dates, dtype=float) for k in pair_keys
-        }
-
         X = assets_excess.to_numpy(dtype=float)
         n_assets = X.shape[1]
+        n_eval = len(eval_dates)
         w_agg = np.full(n_assets, 1.0 / float(n_assets), dtype=float)
 
         beta = run["beta_loadings"].to_numpy(dtype=float)
         ev = run["eigen_vectors"].to_numpy(dtype=float)
         pc_exposure = beta @ ev
 
-        pc_var_df = run["pc_cond_var"].reindex(index=idx)
-        resid_var_df = run["resid_cond_var"].reindex(index=idx)
+        pc_var_arr = run["pc_cond_var"].reindex(index=idx).to_numpy(dtype=float)
+        resid_var_arr = run["resid_cond_var"].reindex(index=idx).to_numpy(dtype=float)
 
-        for dt in _iter_with_progress(eval_dates,
-                                      desc="Eval: trailing vol/corr vs model",
-                                      unit="day", disable=not progress):
-            j = int(idx.get_loc(dt))
+        # Pre-compute integer positions for eval_dates within idx
+        eval_positions = np.array([int(idx.get_loc(dt)) for dt in eval_dates])
+
+        # Pairwise upper-triangle indices
+        triu_i, triu_j = np.triu_indices(n_assets, k=1)
+        n_pairs = len(triu_i)
+        pair_keys: List[str] = []
+        for pi in range(n_pairs):
+            a, b = sorted([asset_names[triu_i[pi]], asset_names[triu_j[pi]]])
+            pair_keys.append(f"{a}|{b}")
+
+        # Pre-allocate numpy arrays instead of DataFrames/Series
+        vol_mse_arr = np.full(n_eval, np.nan, dtype=float)
+        corr_frob_arr = np.full(n_eval, np.nan, dtype=float)
+        pred_vol_arr = np.full((n_eval, n_assets), np.nan, dtype=float)
+        real_vol_arr = np.full((n_eval, n_assets), np.nan, dtype=float)
+        pred_corr_agg_arr = np.full((n_eval, n_assets), np.nan, dtype=float)
+        real_corr_agg_arr = np.full((n_eval, n_assets), np.nan, dtype=float)
+        pred_cov_agg_arr = np.full((n_eval, n_assets), np.nan, dtype=float)
+        real_cov_agg_arr = np.full((n_eval, n_assets), np.nan, dtype=float)
+        pred_corr_pw_arr = np.full((n_eval, n_pairs), np.nan, dtype=float)
+        real_corr_pw_arr = np.full((n_eval, n_pairs), np.nan, dtype=float)
+        pred_cov_pw_arr = np.full((n_eval, n_pairs), np.nan, dtype=float)
+        real_cov_pw_arr = np.full((n_eval, n_pairs), np.nan, dtype=float)
+
+        min_rows = max(5, w // 2)
+
+        for ti, dt in enumerate(_iter_with_progress(
+                eval_dates,
+                desc="Eval: trailing vol/corr vs model",
+                unit="day", disable=not progress)):
+            j = eval_positions[ti]
             end = j - lag
             start = end - w + 1
             Xw = X[start:(end + 1), :]
             Xw = Xw[np.isfinite(Xw).all(axis=1)]
-            if Xw.shape[0] < max(5, w // 2):
+            if Xw.shape[0] < min_rows:
                 continue
 
             realized_cov = np.cov(Xw, rowvar=False, ddof=1)
             realized_cov = 0.5 * (realized_cov + realized_cov.T)
 
-            h_pc = np.clip(pc_var_df.loc[dt].to_numpy(dtype=float).reshape(-1),
-                           0.0, None)
-            h_resid = np.clip(resid_var_df.loc[dt].to_numpy(dtype=float).reshape(-1),
-                              0.0, None)
+            h_pc = np.clip(pc_var_arr[j], 0.0, None)
+            h_resid = np.clip(resid_var_arr[j], 0.0, None)
 
             scaled = pc_exposure * np.sqrt(h_pc).reshape(1, -1)
             pred_cov = scaled @ scaled.T + np.diag(h_resid)
@@ -1354,19 +1415,19 @@ class FactorModel:
             pred_sigma = np.sqrt(np.clip(np.diag(pred_cov), 0.0, None))
             real_sigma = np.sqrt(np.clip(np.diag(realized_cov), 0.0, None))
 
-            pred_vol.loc[dt] = pred_sigma
-            real_vol.loc[dt] = real_sigma
+            pred_vol_arr[ti] = pred_sigma
+            real_vol_arr[ti] = real_sigma
 
             mask = np.isfinite(pred_sigma) & np.isfinite(real_sigma)
             if mask.any():
                 diff = pred_sigma[mask] - real_sigma[mask]
-                vol_mse.loc[dt] = float(np.mean(diff * diff))
+                vol_mse_arr[ti] = float(np.mean(diff * diff))
 
             # Correlation backtest: corr(equal-weighted agg, asset)
-            pred_cov_agg = pred_cov @ w_agg
-            real_cov_agg = realized_cov @ w_agg
-            pred_var_agg = float(w_agg @ pred_cov_agg)
-            real_var_agg = float(w_agg @ real_cov_agg)
+            pred_cov_agg_vec = pred_cov @ w_agg
+            real_cov_agg_vec = realized_cov @ w_agg
+            pred_var_agg = float(w_agg @ pred_cov_agg_vec)
+            real_var_agg = float(w_agg @ real_cov_agg_vec)
             pred_vol_agg = float(np.sqrt(max(pred_var_agg, 0.0)))
             real_vol_agg = float(np.sqrt(max(real_var_agg, 0.0)))
 
@@ -1375,29 +1436,51 @@ class FactorModel:
 
             if pred_vol_agg > 1e-12:
                 denom = pred_vol_agg * pred_sigma
-                ok = np.isfinite(pred_cov_agg) & np.isfinite(denom) & (denom > 1e-12)
-                pred_corr_vec[ok] = pred_cov_agg[ok] / denom[ok]
+                ok = np.isfinite(pred_cov_agg_vec) & np.isfinite(denom) & (denom > 1e-12)
+                pred_corr_vec[ok] = pred_cov_agg_vec[ok] / denom[ok]
 
             if real_vol_agg > 1e-12:
                 denom = real_vol_agg * real_sigma
-                ok = np.isfinite(real_cov_agg) & np.isfinite(denom) & (denom > 1e-12)
-                real_corr_vec[ok] = real_cov_agg[ok] / denom[ok]
+                ok = np.isfinite(real_cov_agg_vec) & np.isfinite(denom) & (denom > 1e-12)
+                real_corr_vec[ok] = real_cov_agg_vec[ok] / denom[ok]
 
-            pred_corr_to_agg.loc[dt] = pred_corr_vec
-            real_corr_to_agg.loc[dt] = real_corr_vec
+            pred_corr_agg_arr[ti] = pred_corr_vec
+            real_corr_agg_arr[ti] = real_corr_vec
+
+            # Covariance backtest: cov(asset, equal-weighted agg)
+            pred_cov_agg_arr[ti] = pred_cov_agg_vec
+            real_cov_agg_arr[ti] = real_cov_agg_vec
 
             pred_corr = covariance_to_correlation(pred_cov, clip=True)
             real_corr = covariance_to_correlation(realized_cov, clip=True)
-            corr_frob_err.loc[dt] = float(
+            corr_frob_arr[ti] = float(
                 np.linalg.norm(pred_corr - real_corr, ord="fro"))
 
-            # Store pairwise correlations (upper triangle)
-            for i in range(n_assets):
-                for j in range(i + 1, n_assets):
-                    a, b = sorted([asset_names[i], asset_names[j]])
-                    key = f"{a}|{b}"
-                    pred_corr_pairwise[key].loc[dt] = float(pred_corr[i, j])
-                    real_corr_pairwise[key].loc[dt] = float(real_corr[i, j])
+            # Pairwise correlations and covariances — vectorized via triu indices
+            pred_corr_pw_arr[ti] = pred_corr[triu_i, triu_j]
+            real_corr_pw_arr[ti] = real_corr[triu_i, triu_j]
+            pred_cov_pw_arr[ti] = pred_cov[triu_i, triu_j]
+            real_cov_pw_arr[ti] = realized_cov[triu_i, triu_j]
+
+        # Convert numpy arrays to pandas objects
+        vol_mse = pd.Series(vol_mse_arr, index=eval_dates, name="vol_mse")
+        corr_frob_err = pd.Series(corr_frob_arr, index=eval_dates, name="corr_frob_err")
+        pred_vol = pd.DataFrame(pred_vol_arr, index=eval_dates, columns=asset_names)
+        real_vol = pd.DataFrame(real_vol_arr, index=eval_dates, columns=asset_names)
+        pred_corr_to_agg = pd.DataFrame(pred_corr_agg_arr, index=eval_dates, columns=asset_names)
+        real_corr_to_agg = pd.DataFrame(real_corr_agg_arr, index=eval_dates, columns=asset_names)
+        pred_cov_to_agg = pd.DataFrame(pred_cov_agg_arr, index=eval_dates, columns=asset_names)
+        real_cov_to_agg = pd.DataFrame(real_cov_agg_arr, index=eval_dates, columns=asset_names)
+
+        pred_corr_pairwise: dict[str, pd.Series] = {}
+        real_corr_pairwise: dict[str, pd.Series] = {}
+        pred_cov_pairwise: dict[str, pd.Series] = {}
+        real_cov_pairwise: dict[str, pd.Series] = {}
+        for p, key in enumerate(pair_keys):
+            pred_corr_pairwise[key] = pd.Series(pred_corr_pw_arr[:, p], index=eval_dates, dtype=float)
+            real_corr_pairwise[key] = pd.Series(real_corr_pw_arr[:, p], index=eval_dates, dtype=float)
+            pred_cov_pairwise[key] = pd.Series(pred_cov_pw_arr[:, p], index=eval_dates, dtype=float)
+            real_cov_pairwise[key] = pd.Series(real_cov_pw_arr[:, p], index=eval_dates, dtype=float)
 
         ins = vol_mse.index[vol_mse.index < train_end]
         oos = vol_mse.index[vol_mse.index >= train_end]
@@ -1448,6 +1531,10 @@ class FactorModel:
                 "real_corr_to_agg": real_corr_to_agg,
                 "pred_corr_pairwise": pred_corr_pairwise,
                 "real_corr_pairwise": real_corr_pairwise,
+                "pred_cov_to_agg": pred_cov_to_agg,
+                "real_cov_to_agg": real_cov_to_agg,
+                "pred_cov_pairwise": pred_cov_pairwise,
+                "real_cov_pairwise": real_cov_pairwise,
             },
         }
 

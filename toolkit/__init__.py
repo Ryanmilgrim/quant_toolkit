@@ -5,11 +5,19 @@ from toolkit.analysis import (
     FactorRun,
     METHOD_PROJECTION,
     METHOD_QP,
+    RegimeCollection,
+    RegimeConfig,
+    RegimeModel,
+    RegimeRun,
     StyleAnalysis,
     StyleAnalysisSnapshot,
     StyleRun,
     StyleSnapshotInfo,
+    TransformConfig,
+    TransformType,
+    apply_transform,
     black_scholes_price,
+    fit_regime_batch,
     list_style_snapshots,
     load_style_snapshot,
     normalize_snapshot_name,
@@ -23,6 +31,7 @@ from toolkit.data import (
     fetch_ff_factors_daily,
     fetch_ff_industry_daily,
 )
+from toolkit.data.fred import FredConfig, fetch_fred_series, search_fred_series
 from toolkit.returns import to_log_returns
 from toolkit.universe import get_universe_returns, get_universe_start_date
 
@@ -31,6 +40,10 @@ __all__ = [
     "FactorRun",
     "METHOD_PROJECTION",
     "METHOD_QP",
+    "RegimeCollection",
+    "RegimeConfig",
+    "RegimeModel",
+    "RegimeRun",
     "StyleAnalysis",
     "StyleAnalysisSnapshot",
     "StyleRun",
@@ -41,6 +54,7 @@ __all__ = [
     "black_scholes_price",
     "fetch_ff_factors_daily",
     "fetch_ff_industry_daily",
+    "fit_regime_batch",
     "get_universe_returns",
     "get_universe_start_date",
     "list_style_snapshots",
@@ -49,4 +63,10 @@ __all__ = [
     "save_style_snapshot",
     "snapshot_path",
     "to_log_returns",
+    "TransformConfig",
+    "TransformType",
+    "apply_transform",
+    "FredConfig",
+    "fetch_fred_series",
+    "search_fred_series",
 ]

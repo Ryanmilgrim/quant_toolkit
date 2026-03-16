@@ -198,8 +198,245 @@ def summarize_style_run(run: Any) -> dict[str, object]:
     }
 
 
+def regime_probabilities_payload(
+    probabilities: pd.DataFrame,
+    *,
+    regime_labels: Optional[dict[int, str]] = None,
+) -> dict[str, object]:
+    """Convert regime probability DataFrame to a stacked-area Plotly payload.
+
+    Parameters
+    ----------
+    probabilities
+        DataFrame with columns ``regime_0``, ``regime_1``, … and a
+        DatetimeIndex.  Values in [0, 1].
+    regime_labels
+        Optional mapping from regime index to human-readable label.
+    """
+    if probabilities.empty:
+        return {"series": [], "y_axis_title": "Probability (%)"}
+
+    data = probabilities.copy().clip(lower=0.0).mul(100.0)
+    dates = [dt.strftime("%Y-%m-%d") for dt in data.index]
+
+    series = []
+    for i, col in enumerate(data.columns):
+        label = col
+        if regime_labels and i in regime_labels:
+            label = f"Regime {i} ({regime_labels[i]})"
+        series.append({
+            "name": label,
+            "x": dates,
+            "y": data[col].round(2).tolist(),
+        })
+
+    return {"series": series, "y_axis_title": "Probability (%)"}
+
+
+def summarize_regime_run(
+    run: Any,
+    *,
+    regime_labels: Optional[dict[int, str]] = None,
+    raw_series: Optional[pd.Series] = None,
+) -> dict[str, object]:
+    """Build the full chart + metrics summary for a RegimeRun.
+
+    Returns a dict with keys: chart_probabilities, chart_series,
+    regime_assignments, transition_matrix, regime_table, metrics,
+    regression_stats, warnings.
+
+    Parameters
+    ----------
+    raw_series
+        The untransformed series. If provided and different from the
+        transformed series, a dual-axis chart payload is produced so the
+        frontend can show raw on the left axis and transformed on the right.
+    """
+    warnings: list[str] = []
+    series_name = run.params.get("series_name", "series")
+
+    # Stacked regime probabilities chart
+    chart_probabilities = regime_probabilities_payload(
+        run.smoothed_probabilities, regime_labels=regime_labels,
+    )
+    # Attach series_name as chart title
+    chart_probabilities["title"] = series_name
+
+    # Transformed series as line chart
+    transformed_s = run.series
+    series_df = transformed_s.to_frame(name=series_name)
+    chart_series = line_chart_payload(
+        series_df, y_axis_title=series_name,
+    )
+    chart_series["title"] = series_name
+
+    # Dual-axis payload: raw (left) + transformed (right) if applicable
+    chart_dual_axis = None
+    if raw_series is not None and not raw_series.equals(transformed_s):
+        raw_dates = [dt.strftime("%Y-%m-%d") for dt in raw_series.index]
+        trans_dates = [dt.strftime("%Y-%m-%d") for dt in transformed_s.index]
+        chart_dual_axis = {
+            "title": series_name,
+            "raw": {
+                "name": raw_series.name or "Raw",
+                "x": raw_dates,
+                "y": raw_series.round(6).tolist(),
+            },
+            "transformed": {
+                "name": f"{series_name} (transformed)",
+                "x": trans_dates,
+                "y": transformed_s.round(6).tolist(),
+            },
+        }
+
+    # Regime assignments for overlay colouring
+    assignments = run.regime_assignments
+    regime_assignments_payload = {
+        "x": [dt.strftime("%Y-%m-%d") for dt in assignments.index],
+        "regimes": assignments.tolist(),
+    }
+
+    # Transition matrix
+    tm = run.transition_matrix
+    transition_matrix_payload = {
+        "labels": list(tm.columns),
+        "values": tm.round(4).values.tolist(),
+    }
+
+    # Regime summary table
+    rp = run.regime_params
+    ed = run.expected_durations
+    regime_table = []
+    for i in sorted(rp.keys()):
+        label = ""
+        if regime_labels and i in regime_labels:
+            label = regime_labels[i]
+        regime_table.append({
+            "regime": i,
+            "label": label,
+            "mean": round(rp[i].get("mean", float("nan")), 4),
+            "variance": round(rp[i].get("variance", float("nan")), 4),
+            "expected_duration": round(float(ed.iloc[i]), 1) if i < len(ed) else None,
+        })
+
+    # Regression statistics (parameter estimates with significance)
+    regression_stats = []
+    model_params = run.results.get("model_params")
+    pvalues = run.results.get("pvalues")
+    bse = run.results.get("bse")
+    tvalues = run.results.get("tvalues")
+    if model_params is not None and len(model_params) > 0:
+        for param_name in model_params.index:
+            coef = float(model_params[param_name])
+            entry: dict[str, Any] = {"name": param_name, "coef": round(coef, 6)}
+            if bse is not None and param_name in bse.index:
+                entry["std_err"] = round(float(bse[param_name]), 6)
+            if tvalues is not None and param_name in tvalues.index:
+                entry["t_stat"] = round(float(tvalues[param_name]), 4)
+            if pvalues is not None and param_name in pvalues.index:
+                pv = float(pvalues[param_name])
+                entry["pvalue"] = round(pv, 6)
+                entry["significant"] = pv < 0.05
+            regression_stats.append(entry)
+
+    # Model-fit metrics
+    meta = run.meta
+    metrics: dict[str, Any] = {
+        "series_name": series_name,
+        "k_regimes": run.params.get("k_regimes"),
+        "n_obs": meta.get("n_obs"),
+        "n_train": meta.get("n_train"),
+        "aic": round(run.results.get("aic", float("nan")), 2),
+        "bic": round(run.results.get("bic", float("nan")), 2),
+        "log_likelihood": round(run.results.get("log_likelihood", float("nan")), 2),
+        "train_end": run.params.get("train_end"),
+        "start": meta.get("start_date"),
+        "end": meta.get("end_date"),
+        "converged": meta.get("converged"),
+    }
+
+    if not meta.get("converged"):
+        warnings.append("Model did not fully converge. Results may be unreliable.")
+
+    # Train-end vertical line shape for the frontend
+    train_end_shape = None
+    if run.params.get("train_end"):
+        train_end_shape = {
+            "date": run.params["train_end"],
+            "label": "Training cutoff",
+        }
+
+    return {
+        "chart_probabilities": chart_probabilities,
+        "chart_series": chart_series,
+        "chart_dual_axis": chart_dual_axis,
+        "regime_assignments": regime_assignments_payload,
+        "transition_matrix": transition_matrix_payload,
+        "regime_table": regime_table,
+        "regression_stats": regression_stats,
+        "metrics": metrics,
+        "train_end_marker": train_end_shape,
+        "warnings": warnings,
+    }
+
+
+def summarize_regime_collection(
+    collection: Any,
+    *,
+    regime_labels_map: Optional[dict[str, dict[int, str]]] = None,
+    raw_series_map: Optional[dict[str, pd.Series]] = None,
+) -> dict[str, object]:
+    """Build chart payloads for a RegimeCollection.
+
+    Parameters
+    ----------
+    collection
+        A :class:`RegimeCollection` instance.
+    regime_labels_map
+        Optional mapping from regime name to per-regime labels.
+    raw_series_map
+        Optional mapping from regime name to untransformed raw series.
+        When provided, individual summaries include dual-axis chart data.
+
+    Returns
+    -------
+    dict
+        Keys: ``individual_summaries``, ``collection_info``.
+    """
+    if not collection:
+        return {
+            "individual_summaries": {},
+            "collection_info": {"n_regimes": 0, "regime_names": []},
+        }
+
+    regime_labels_map = regime_labels_map or {}
+    raw_series_map = raw_series_map or {}
+
+    # Per-regime summaries
+    individual_summaries = {}
+    for cfg, run in collection.entries:
+        labels = regime_labels_map.get(cfg.name) or (
+            dict(cfg.regime_labels) if cfg.regime_labels else None
+        )
+        raw_s = raw_series_map.get(cfg.name)
+        individual_summaries[cfg.name] = summarize_regime_run(
+            run, regime_labels=labels, raw_series=raw_s,
+        )
+
+    return {
+        "individual_summaries": individual_summaries,
+        "collection_info": {
+            "n_regimes": len(collection),
+            "regime_names": collection.names,
+        },
+    }
+
+
 __all__ = [
     "line_chart_payload",
+    "regime_probabilities_payload",
+    "summarize_regime_collection",
+    "summarize_regime_run",
     "summarize_style_run",
     "weights_history_payload",
 ]

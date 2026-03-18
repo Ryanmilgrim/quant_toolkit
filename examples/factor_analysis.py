@@ -14,7 +14,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from toolkit.analysis.factor_analysis import FactorModel, FactorRun
+from toolkit.analysis.risk_model import RiskModel, RiskModelRun, FactorModel, FactorRun
 
 
 def main() -> None:

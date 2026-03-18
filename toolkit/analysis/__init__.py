@@ -2,8 +2,11 @@
 
 from .benchmark_style import METHOD_PROJECTION, METHOD_QP, StyleAnalysis, StyleRun
 from .black_scholes import _norm_cdf, black_scholes_price
-from .factor_analysis import FactorModel, FactorRun
-from .factor_storage import (
+from .risk_model import RiskModel, RiskModelRun, FactorModel, FactorRun
+from .kalman_filter import KalmanFilter, KalmanResult
+from .risk_storage import (
+    RiskModelSnapshot,
+    RiskModelSnapshotInfo,
     FactorAnalysisSnapshot,
     FactorSnapshotInfo,
     list_factor_snapshots,
@@ -25,8 +28,14 @@ __all__ = [
     "FactorModel",
     "FactorRun",
     "FactorSnapshotInfo",
+    "KalmanFilter",
+    "KalmanResult",
     "METHOD_PROJECTION",
     "METHOD_QP",
+    "RiskModel",
+    "RiskModelRun",
+    "RiskModelSnapshot",
+    "RiskModelSnapshotInfo",
     "StyleAnalysis",
     "StyleAnalysisSnapshot",
     "StyleRun",

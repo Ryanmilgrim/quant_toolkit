@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 
-from toolkit.factor_charts import (
+from toolkit.risk_charts import (
     plot_agg_correlation_backtest,
     plot_asset_residuals_and_vol,
     plot_beta_heatmap,

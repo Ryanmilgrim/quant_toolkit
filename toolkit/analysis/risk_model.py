@@ -1561,9 +1561,23 @@ class RiskModel:
         n_eval = len(eval_dates)
         w_agg = np.full(n_assets, 1.0 / float(n_assets), dtype=float)
 
-        beta = run["beta_loadings"].to_numpy(dtype=float)
         ev = run["eigen_vectors"].to_numpy(dtype=float)
-        pc_exposure = beta @ ev
+        has_beta_ts = "beta_ts" in run.results
+        factor_names = list(run["beta_loadings"].columns)
+
+        if has_beta_ts:
+            _beta_ts = run.results["beta_ts"]
+            beta_3d = np.zeros((n_eval, n_assets, len(factor_names)), dtype=float)
+            for _ai, _a in enumerate(asset_names):
+                if _a not in _beta_ts:
+                    beta_3d[:, _ai, :] = run["beta_loadings"].loc[_a, factor_names].to_numpy(dtype=float)
+                else:
+                    _ts = _beta_ts[_a].reindex(columns=factor_names, fill_value=0.0)
+                    _ts_ri = _ts.reindex(_ts.index.union(eval_dates)).ffill().bfill()
+                    beta_3d[:, _ai, :] = _ts_ri.reindex(eval_dates).to_numpy(dtype=float)
+            pc_exposure_3d = np.einsum("taf,fp->tap", beta_3d, ev)  # (n_eval, n_assets, n_pcs)
+        else:
+            pc_exposure_static = run["beta_loadings"].to_numpy(dtype=float) @ ev
 
         pc_var_arr = run["pc_cond_var"].reindex(index=idx).to_numpy(dtype=float)
         resid_var_arr = run["resid_cond_var"].reindex(index=idx).to_numpy(dtype=float)
@@ -1613,7 +1627,8 @@ class RiskModel:
             h_pc = np.clip(pc_var_arr[j], 0.0, None)
             h_resid = np.clip(resid_var_arr[j], 0.0, None)
 
-            scaled = pc_exposure * np.sqrt(h_pc).reshape(1, -1)
+            pc_exp = pc_exposure_3d[ti] if has_beta_ts else pc_exposure_static
+            scaled = pc_exp * np.sqrt(h_pc).reshape(1, -1)
             pred_cov = scaled @ scaled.T + np.diag(h_resid)
             pred_cov = 0.5 * (pred_cov + pred_cov.T)
 

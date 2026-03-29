@@ -2,7 +2,9 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from toolkit.analysis.factor_analysis import (
+from toolkit.analysis.risk_model import (
+    RiskModel,
+    RiskModelRun,
     FactorModel,
     FactorRun,
     annualize_vol,
@@ -199,7 +201,7 @@ def test_iter_asset_covariances() -> None:
 def test_factor_run_summary() -> None:
     run = _mock_factor_run()
     s = run.summary()
-    assert "FactorRun" in s
+    assert "RiskModelRun" in s
     assert "n_assets" in s
 
 
@@ -291,3 +293,76 @@ def test_factor_model_rejects_short_training() -> None:
             train_end=pd.Timestamp(assets.index[10]),
             progress=False,
         )
+
+
+# ---------------------------------------------------------------------------
+# Kalman filter integration tests
+# ---------------------------------------------------------------------------
+
+def test_pipeline_produces_kalman_results() -> None:
+    """Verify all new Kalman-related keys exist in results."""
+    assets, factors, rf = _synthetic_factor_universe(
+        periods=300, n_assets=5, n_factors=3, seed=10,
+    )
+    fm = FactorModel(rf_name="Rf", garch_dist="t", pca_demean=False)
+    run = fm.run(assets=assets, factors=factors, rf=rf, progress=False)
+
+    assert "beta_ts" in run.results
+    assert "alpha_ts" in run.results
+    assert "beta_se" in run.results
+    assert "kalman_diagnostics" in run.results
+
+    # Check that each asset has entries
+    for a in run.assets:
+        assert a in run.results["beta_ts"]
+        assert a in run.results["alpha_ts"]
+        assert a in run.results["beta_se"]
+        assert a in run.results["kalman_diagnostics"]
+        diag = run.results["kalman_diagnostics"][a]
+        assert "R" in diag
+        assert "Q" in diag
+        assert "log_likelihood" in diag
+
+
+def test_kalman_residuals_shape() -> None:
+    """Residuals should have same shape as assets."""
+    assets, factors, rf = _synthetic_factor_universe(
+        periods=300, n_assets=5, n_factors=3, seed=11,
+    )
+    fm = FactorModel(rf_name="Rf")
+    run = fm.run(assets=assets, factors=factors, rf=rf, progress=False)
+
+    resid = run["resid"]
+    assert resid.shape[1] == 5
+    assert resid.shape[0] == run.meta["n_obs"]
+
+
+def test_beta_matrix_at() -> None:
+    """beta_matrix_at should return correct shape."""
+    assets, factors, rf = _synthetic_factor_universe(
+        periods=300, n_assets=5, n_factors=3, seed=12,
+    )
+    fm = FactorModel(rf_name="Rf")
+    run = fm.run(assets=assets, factors=factors, rf=rf, progress=False)
+
+    dt = run["resid"].index[150]
+    bmat = run.beta_matrix_at(dt)
+    assert bmat.shape == (5, 3)
+    assert list(bmat.index) == run.assets
+    assert list(bmat.columns) == run.factors
+
+
+def test_asset_cov_still_psd() -> None:
+    """Covariance matrices must remain PSD with Kalman betas."""
+    assets, factors, rf = _synthetic_factor_universe(
+        periods=300, n_assets=5, n_factors=3, seed=13,
+    )
+    fm = FactorModel(rf_name="Rf")
+    run = fm.run(assets=assets, factors=factors, rf=rf, progress=False)
+
+    last_dt = run["asset_cond_var"].index[-1]
+    cov = run.asset_cov_at(last_dt)
+    cov_arr = cov.to_numpy()
+    np.testing.assert_allclose(cov_arr, cov_arr.T, atol=1e-12)
+    eigvals = np.linalg.eigvalsh(cov_arr)
+    assert (eigvals >= -1e-10).all()

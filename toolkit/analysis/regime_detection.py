@@ -15,6 +15,9 @@ from typing import Any, Optional
 import numpy as np
 import pandas as pd
 import statsmodels.api as sm
+from statsmodels.tsa.regime_switching.markov_autoregression import (
+    MarkovAutoregression,
+)
 from statsmodels.tsa.regime_switching.markov_regression import MarkovRegression
 from statsmodels.tsa.regime_switching.markov_switching import MarkovSwitching
 
@@ -41,6 +44,8 @@ class RegimeConfig:
     switching_variance: bool = True
     switching_trend: bool = True
     model_type: str = "regression"
+    order: int = 0
+    switching_ar: bool = False
     train_end: str | None = None
     regime_labels: dict[int, str] | None = None
 
@@ -115,17 +120,21 @@ def _reorder_regimes(
     regime_params: dict[int, dict[str, float]],
     k_regimes: int,
 ) -> tuple[
-    pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[int, dict[str, float]]
+    pd.DataFrame, pd.DataFrame, pd.DataFrame, dict[int, dict[str, float]],
+    np.ndarray,
 ]:
     """Reorder regimes so that regime 0 has the lowest mean.
 
     This ensures semantic stability across refits (e.g. regime 0 is always
     'recession' for GDP growth).
+
+    Returns the reordered smoothed, filtered, transition matrix, regime params,
+    and the order array (maps new index → original index).
     """
     means = [regime_params[i].get("mean", np.nan) for i in range(k_regimes)]
     order = np.argsort(means)
     if np.array_equal(order, np.arange(k_regimes)):
-        return smoothed, filtered, transition_matrix, regime_params
+        return smoothed, filtered, transition_matrix, regime_params, order
 
     # Reorder probability columns
     new_cols = [f"regime_{i}" for i in range(k_regimes)]
@@ -145,7 +154,7 @@ def _reorder_regimes(
     # Reorder regime_params
     regime_params_new = {i: regime_params[int(order[i])] for i in range(k_regimes)}
 
-    return smoothed_new, filtered_new, transition_matrix_new, regime_params_new
+    return smoothed_new, filtered_new, transition_matrix_new, regime_params_new, order
 
 
 # ---------------------------------------------------------------------------
@@ -229,6 +238,8 @@ class RegimeRun:
             f"  switching_variance: {p.get('switching_variance')}",
             f"  switching_trend:    {p.get('switching_trend')}",
             f"  model_type:         {p.get('model_type')}",
+            f"  order:              {p.get('order', 0)}",
+            f"  switching_ar:       {p.get('switching_ar', False)}",
             f"  n_obs:              {m.get('n_obs', '?')}",
             f"  train_end:          {p.get('train_end', 'full sample')}",
             f"  converged:          {m.get('converged', '?')}",
@@ -317,25 +328,37 @@ class RegimeModel:
         switching_trend: bool = True,
         model_type: str = "regression",
         switching_exog: bool = False,
+        order: int = 0,
+        switching_ar: bool = False,
     ) -> None:
         if k_regimes < 2 or k_regimes > 5:
             raise ValueError("k_regimes must be between 2 and 5")
-        if model_type not in ("regression", "switching"):
-            raise ValueError("model_type must be 'regression' or 'switching'")
+        if model_type not in ("regression", "switching", "autoregression"):
+            raise ValueError(
+                "model_type must be 'regression', 'switching', or 'autoregression'"
+            )
         self.k_regimes = k_regimes
         self.switching_variance = switching_variance
         self.switching_trend = switching_trend
-        self.model_type = model_type
+        self.model_type = "autoregression" if order > 0 else model_type
         self.switching_exog = switching_exog
+        self.order = order
+        self.switching_ar = switching_ar
 
     @classmethod
     def from_config(cls, config: RegimeConfig) -> "RegimeModel":
         """Create a RegimeModel from a :class:`RegimeConfig`."""
+        # Auto-select autoregression when order > 0
+        model_type = config.model_type
+        if config.order > 0 and model_type != "autoregression":
+            model_type = "autoregression"
         return cls(
             k_regimes=config.k_regimes,
             switching_variance=config.switching_variance,
             switching_trend=config.switching_trend,
-            model_type=config.model_type,
+            model_type=model_type,
+            order=config.order,
+            switching_ar=config.switching_ar,
         )
 
     def run(
@@ -394,17 +417,25 @@ class RegimeModel:
         )
 
         # --- Get full-sample probabilities ---
+        # MarkovAutoregression drops the first `order` observations, so
+        # the probability arrays may be shorter than `s`.  Use the index
+        # from the fitted probabilities when available.
         if train_end_ts is not None and len(s) > len(train_s):
             # Apply fitted params to full series via smooth()
             full_smoothed, full_filtered = self._apply_params_to_full(
                 s, fitted, exog=exog,
             )
         else:
+            prob_index = (
+                fitted.smoothed_marginal_probabilities.index
+                if isinstance(fitted.smoothed_marginal_probabilities, pd.DataFrame)
+                else s.index[-len(fitted.smoothed_marginal_probabilities):]
+            )
             full_smoothed = _probabilities_to_dataframe(
-                fitted.smoothed_marginal_probabilities, s.index, self.k_regimes,
+                fitted.smoothed_marginal_probabilities, prob_index, self.k_regimes,
             )
             full_filtered = _probabilities_to_dataframe(
-                fitted.filtered_marginal_probabilities, s.index, self.k_regimes,
+                fitted.filtered_marginal_probabilities, prob_index, self.k_regimes,
             )
 
         # --- Extract results ---
@@ -412,7 +443,7 @@ class RegimeModel:
         regime_params = _extract_regime_params(fitted, self.k_regimes)
 
         # Reorder regimes so regime 0 = lowest mean
-        full_smoothed, full_filtered, transition_matrix, regime_params = (
+        full_smoothed, full_filtered, transition_matrix, regime_params, regime_order = (
             _reorder_regimes(
                 full_smoothed, full_filtered, transition_matrix,
                 regime_params, self.k_regimes,
@@ -421,7 +452,7 @@ class RegimeModel:
 
         regime_assignments = pd.Series(
             full_smoothed.values.argmax(axis=1),
-            index=s.index,
+            index=full_smoothed.index,
             name="regime",
             dtype=int,
         )
@@ -450,13 +481,17 @@ class RegimeModel:
         except Exception:
             tvalues = pd.Series(dtype=float, name="tvalues")
 
+        # For autoregression, the effective series excludes the first `order`
+        # observations used as AR lags.
+        effective_s = s.loc[full_smoothed.index]
+
         meta: dict[str, Any] = {
             "fit_date": datetime.now().isoformat(),
-            "n_obs": len(s),
+            "n_obs": len(effective_s),
             "n_train": len(train_s),
             "converged": converged,
-            "start_date": s.index.min().date().isoformat(),
-            "end_date": s.index.max().date().isoformat(),
+            "start_date": effective_s.index.min().date().isoformat(),
+            "end_date": effective_s.index.max().date().isoformat(),
         }
         if train_end_ts is not None:
             meta["train_end"] = train_end_ts.date().isoformat()
@@ -467,7 +502,7 @@ class RegimeModel:
             "regime_assignments": regime_assignments,
             "transition_matrix": transition_matrix,
             "regime_params": regime_params,
-            "series": s,
+            "series": effective_s,
             "expected_durations": expected_durations,
             "aic": float(fitted.aic),
             "bic": float(fitted.bic),
@@ -476,6 +511,7 @@ class RegimeModel:
             "pvalues": pvalues,
             "bse": bse,
             "tvalues": tvalues,
+            "regime_order": regime_order,
             "meta": meta,
         }
 
@@ -486,6 +522,8 @@ class RegimeModel:
             "switching_trend": self.switching_trend,
             "model_type": self.model_type,
             "switching_exog": self.switching_exog,
+            "order": self.order,
+            "switching_ar": self.switching_ar,
             "train_end": train_end_ts.date().isoformat() if train_end_ts else None,
         }
 
@@ -500,7 +538,17 @@ class RegimeModel:
         series_name: str,
     ) -> tuple[Any, bool]:
         """Build and fit the statsmodels model with convergence retries."""
-        if self.model_type == "regression":
+        if self.model_type == "autoregression" or self.order > 0:
+            model = MarkovAutoregression(
+                s,
+                k_regimes=self.k_regimes,
+                order=self.order,
+                trend="c",
+                switching_ar=self.switching_ar,
+                switching_variance=self.switching_variance,
+                switching_trend=self.switching_trend,
+            )
+        elif self.model_type == "regression":
             model = MarkovRegression(
                 s,
                 k_regimes=self.k_regimes,
@@ -540,7 +588,17 @@ class RegimeModel:
         exog: Optional[pd.DataFrame],
     ) -> tuple[pd.DataFrame, pd.DataFrame]:
         """Apply trained parameters to the full series via smooth()."""
-        if self.model_type == "regression":
+        if self.model_type == "autoregression" or self.order > 0:
+            full_model = MarkovAutoregression(
+                full_series,
+                k_regimes=self.k_regimes,
+                order=self.order,
+                trend="c",
+                switching_ar=self.switching_ar,
+                switching_variance=self.switching_variance,
+                switching_trend=self.switching_trend,
+            )
+        elif self.model_type == "regression":
             full_model = MarkovRegression(
                 full_series,
                 k_regimes=self.k_regimes,
@@ -558,13 +616,18 @@ class RegimeModel:
             )
 
         full_result = full_model.smooth(fitted.params)
+        prob_index = (
+            full_result.smoothed_marginal_probabilities.index
+            if isinstance(full_result.smoothed_marginal_probabilities, pd.DataFrame)
+            else full_series.index[-len(full_result.smoothed_marginal_probabilities):]
+        )
         smoothed = _probabilities_to_dataframe(
             full_result.smoothed_marginal_probabilities,
-            full_series.index, self.k_regimes,
+            prob_index, self.k_regimes,
         )
         filtered = _probabilities_to_dataframe(
             full_result.filtered_marginal_probabilities,
-            full_series.index, self.k_regimes,
+            prob_index, self.k_regimes,
         )
         return smoothed, filtered
 

@@ -9,10 +9,51 @@ from __future__ import annotations
 
 from typing import Any, Optional
 
+import math
+import re
+
 import numpy as np
 import pandas as pd
 
 from toolkit.charts import STEPS_PER_YEAR, _top_weights, performance_summary
+
+
+def _sanitize(val: Any) -> Any:
+    """Replace NaN / Inf with None for JSON serialization."""
+    if isinstance(val, float) and (math.isnan(val) or math.isinf(val)):
+        return None
+    return val
+
+
+def _infer_steps_per_year(index: pd.DatetimeIndex) -> int:
+    """Infer annualization factor from a DatetimeIndex."""
+    try:
+        freq = pd.infer_freq(index)
+    except (ValueError, TypeError):
+        freq = None
+    if freq:
+        base = freq.split("-")[0] if "-" in freq else freq
+        mapping = {
+            "D": 252, "B": 252,
+            "W": 52,
+            "MS": 12, "ME": 12, "M": 12,
+            "QS": 4, "QE": 4, "Q": 4,
+            "YS": 1, "YE": 1, "A": 1, "AS": 1,
+        }
+        if base in mapping:
+            return mapping[base]
+    # Fallback: estimate from median gap between observations
+    if len(index) >= 2:
+        median_days = float(np.median(np.diff(index).astype("timedelta64[D]").astype(int)))
+        if median_days <= 3:
+            return 252
+        if median_days <= 10:
+            return 52
+        if median_days <= 45:
+            return 12
+        if median_days <= 120:
+            return 4
+    return 1
 
 
 def line_chart_payload(
@@ -303,7 +344,10 @@ def summarize_regime_run(
         "values": tm.round(4).values.tolist(),
     }
 
-    # Regime summary table
+    # Annualization factor from the series frequency
+    steps = _infer_steps_per_year(transformed_s.index)
+
+    # Regime summary table (annualized)
     rp = run.regime_params
     ed = run.expected_durations
     regime_table = []
@@ -311,15 +355,43 @@ def summarize_regime_run(
         label = ""
         if regime_labels and i in regime_labels:
             label = regime_labels[i]
+        raw_mean = rp[i].get("mean", float("nan"))
+        raw_var = rp[i].get("variance", float("nan"))
+        mean_ann = raw_mean * steps * 100.0  # annualized %
+        std_ann = (
+            math.sqrt(raw_var * steps) * 100.0
+            if np.isfinite(raw_var) and raw_var >= 0 else None
+        )
+        dur_periods = float(ed.iloc[i]) if i < len(ed) else None
+        dur_years = round(dur_periods / steps, 2) if dur_periods is not None else None
         regime_table.append({
             "regime": i,
             "label": label,
-            "mean": round(rp[i].get("mean", float("nan")), 4),
-            "variance": round(rp[i].get("variance", float("nan")), 4),
-            "expected_duration": round(float(ed.iloc[i]), 1) if i < len(ed) else None,
+            "mean": _sanitize(round(mean_ann, 2)),
+            "std": _sanitize(round(std_ann, 2)) if std_ann is not None else None,
+            "expected_duration": dur_years,
         })
 
     # Regression statistics (parameter estimates with significance)
+    # Remap parameter names to match reordered regime indices
+    regime_order = run.results.get("regime_order")
+    # Build reverse map: original_idx → new_idx
+    _reverse_order: dict[int, int] = {}
+    if regime_order is not None:
+        for new_idx, orig_idx in enumerate(regime_order):
+            _reverse_order[int(orig_idx)] = new_idx
+
+    def _remap_param_name(name: str) -> str:
+        """Rename param suffixes like const[1] to match reordered regime indices."""
+        if not _reverse_order:
+            return name
+        m = re.match(r"^(.+)\[(\d+)\]$", name)
+        if m:
+            prefix, orig = m.group(1), int(m.group(2))
+            if orig in _reverse_order:
+                return f"{prefix}[{_reverse_order[orig]}]"
+        return name
+
     regression_stats = []
     model_params = run.results.get("model_params")
     pvalues = run.results.get("pvalues")
@@ -328,15 +400,18 @@ def summarize_regime_run(
     if model_params is not None and len(model_params) > 0:
         for param_name in model_params.index:
             coef = float(model_params[param_name])
-            entry: dict[str, Any] = {"name": param_name, "coef": round(coef, 6)}
+            entry: dict[str, Any] = {
+                "name": _remap_param_name(param_name),
+                "coef": _sanitize(round(coef, 6)),
+            }
             if bse is not None and param_name in bse.index:
-                entry["std_err"] = round(float(bse[param_name]), 6)
+                entry["std_err"] = _sanitize(round(float(bse[param_name]), 6))
             if tvalues is not None and param_name in tvalues.index:
-                entry["t_stat"] = round(float(tvalues[param_name]), 4)
+                entry["t_stat"] = _sanitize(round(float(tvalues[param_name]), 4))
             if pvalues is not None and param_name in pvalues.index:
                 pv = float(pvalues[param_name])
-                entry["pvalue"] = round(pv, 6)
-                entry["significant"] = pv < 0.05
+                entry["pvalue"] = _sanitize(round(pv, 6))
+                entry["significant"] = bool(pv < 0.05) if np.isfinite(pv) else None
             regression_stats.append(entry)
 
     # Model-fit metrics
@@ -346,9 +421,9 @@ def summarize_regime_run(
         "k_regimes": run.params.get("k_regimes"),
         "n_obs": meta.get("n_obs"),
         "n_train": meta.get("n_train"),
-        "aic": round(run.results.get("aic", float("nan")), 2),
-        "bic": round(run.results.get("bic", float("nan")), 2),
-        "log_likelihood": round(run.results.get("log_likelihood", float("nan")), 2),
+        "aic": _sanitize(round(run.results.get("aic", float("nan")), 2)),
+        "bic": _sanitize(round(run.results.get("bic", float("nan")), 2)),
+        "log_likelihood": _sanitize(round(run.results.get("log_likelihood", float("nan")), 2)),
         "train_end": run.params.get("train_end"),
         "start": meta.get("start_date"),
         "end": meta.get("end_date"),

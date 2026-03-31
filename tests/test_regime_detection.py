@@ -436,6 +436,68 @@ def test_invalid_model_type() -> None:
         RegimeModel(model_type="invalid")
 
 
+# ---------------------------------------------------------------------------
+# Autoregression (MarkovAutoregression)
+# ---------------------------------------------------------------------------
+
+class TestMarkovAutoregression:
+    @pytest.fixture(scope="class")
+    def run(self) -> RegimeRun:
+        series = _synthetic_regime_series(k_regimes=2, n_obs=400, seed=42)
+        model = RegimeModel(
+            k_regimes=2,
+            switching_variance=True,
+            switching_trend=True,
+            order=4,
+            switching_ar=False,
+        )
+        return model.run(series, name="test_ar")
+
+    def test_smoothed_shape(self, run: RegimeRun) -> None:
+        assert run.smoothed_probabilities.shape[1] == 2
+
+    def test_model_type_in_params(self, run: RegimeRun) -> None:
+        assert run.params["model_type"] == "autoregression"
+        assert run.params["order"] == 4
+        assert run.params["switching_ar"] is False
+
+    def test_transition_matrix_rows_sum_to_one(self, run: RegimeRun) -> None:
+        row_sums = run.transition_matrix.sum(axis=1)
+        np.testing.assert_allclose(row_sums.values, 1.0, atol=1e-6)
+
+    def test_regime_assignments_values(self, run: RegimeRun) -> None:
+        unique = set(run.regime_assignments.unique())
+        assert unique.issubset({0, 1})
+
+    def test_regimes_ordered_by_mean(self, run: RegimeRun) -> None:
+        means = [run.regime_params[i]["mean"] for i in range(2)]
+        assert means[0] <= means[1]
+
+
+def test_order_zero_uses_regression() -> None:
+    """order=0 should fall back to MarkovRegression, not MarkovAutoregression."""
+    series = _synthetic_regime_series(k_regimes=2, n_obs=300, seed=10)
+    model = RegimeModel(k_regimes=2, order=0)
+    run = model.run(series, name="order0_test")
+    assert run.params["order"] == 0
+    # Should still produce valid results
+    assert run.smoothed_probabilities.shape[1] == 2
+
+
+def test_from_config_auto_selects_autoregression() -> None:
+    """from_config should auto-select autoregression when order > 0."""
+    cfg = RegimeConfig(
+        name="AR Test",
+        fred_series_id="GDP",
+        order=4,
+        switching_ar=False,
+        model_type="regression",  # should be overridden
+    )
+    model = RegimeModel.from_config(cfg)
+    assert model.model_type == "autoregression"
+    assert model.order == 4
+
+
 def test_series_too_short() -> None:
     series = pd.Series([1.0] * 10, index=pd.date_range("2020-01-01", periods=10))
     model = RegimeModel(k_regimes=2)

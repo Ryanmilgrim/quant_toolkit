@@ -1,4 +1,14 @@
-"""Run a style analysis on synthetic data and generate charts."""
+"""Benchmark Style Analysis -- example usage.
+
+Demonstrates:
+  - Running a rolling style decomposition on synthetic data
+  - Printing the performance summary
+  - Generating growth, tracking error, and weight charts
+
+Run with::
+
+    python examples/style_analysis.py
+"""
 
 import matplotlib
 matplotlib.use("Agg")

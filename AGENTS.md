@@ -14,14 +14,22 @@ separate repo: [quant_website](https://github.com/Ryanmilgrim/quant_website).
 toolkit/
   __init__.py            # Top-level public API
   charts.py              # Matplotlib chart functions (style analysis)
-  factor_charts.py       # Matplotlib chart functions (factor analysis)
+  factor_charts.py       # Matplotlib chart functions (factor/risk model)
+  regime_charts.py       # Matplotlib chart functions (regime detection)
   plotly_payload.py      # Plotly.js JSON payload builders (bridge for web apps)
   returns.py             # Return transforms (simple <-> log)
   analysis/              # Analytical models
     benchmark_style.py   # StyleAnalysis, StyleRun (with plot methods)
-    factor_analysis.py   # FactorModel, FactorRun (PCA + GARCH risk model)
+    risk_model.py        # RiskModel, RiskModelRun (PCA + GARCH)
+    factor_analysis.py   # Legacy aliases (FactorModel -> RiskModel)
+    kalman_filter.py     # Kalman filter for time-varying betas
     black_scholes.py     # European option pricing
-    style_storage.py     # Save/load analysis snapshots (pickle)
+    regime_detection.py  # RegimeDetector, RegimeConfig, RegimeCollection
+    transforms.py        # Stationarity transforms for time series
+    style_storage.py     # Save/load style analysis snapshots (pickle)
+    risk_storage.py      # Save/load risk model snapshots
+    factor_storage.py    # Legacy aliases for risk storage
+    regime_storage.py    # Save/load regime collections
   data/                  # Market data adapters
     french_industry.py   # Fama-French Data Library fetcher
   universe/              # Universe construction

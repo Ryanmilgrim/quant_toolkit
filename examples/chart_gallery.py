@@ -1,4 +1,13 @@
-"""Demonstrate all chart functions with synthetic data."""
+"""Chart Gallery -- example usage.
+
+Demonstrates:
+  - All matplotlib chart functions for style analysis
+  - Individual chart calls (growth, tracking error, weights, snapshot)
+
+Run with::
+
+    python examples/chart_gallery.py
+"""
 
 import matplotlib
 matplotlib.use("Agg")

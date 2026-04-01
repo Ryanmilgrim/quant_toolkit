@@ -1,4 +1,13 @@
-"""Price European call and put options with Black-Scholes."""
+"""Black-Scholes Option Pricing -- example usage.
+
+Demonstrates:
+  - Pricing a European call and put with the same parameters
+  - Verifying put-call parity
+
+Run with::
+
+    python examples/black_scholes_pricing.py
+"""
 
 from toolkit.analysis import black_scholes_price
 

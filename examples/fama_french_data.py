@@ -1,4 +1,14 @@
-"""Fetch Fama-French industry returns and factor data."""
+"""Fama-French Data -- example usage.
+
+Demonstrates:
+  - Fetching daily industry returns at multiple granularities
+  - Fetching factor data (FF3, FF5)
+  - Constructing a universe via get_universe_returns()
+
+Run with::
+
+    python examples/fama_french_data.py
+"""
 
 from datetime import date
 
